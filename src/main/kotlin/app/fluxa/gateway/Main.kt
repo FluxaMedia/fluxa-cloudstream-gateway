@@ -1,5 +1,7 @@
 package app.fluxa.gateway
 
+import com.lagradost.cloudstream3.AnimeLoadResponse
+import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MovieLoadResponse
@@ -39,7 +41,14 @@ data class SearchItemDto(
 data class SearchPageDto(val items: List<SearchItemDto>, val hasNext: Boolean)
 
 @Serializable
-data class EpisodeDto(val data: String, val name: String?, val season: Int?, val episode: Int?, val poster: String?)
+data class EpisodeDto(
+    val data: String,
+    val name: String?,
+    val season: Int?,
+    val episode: Int?,
+    val poster: String?,
+    val dub: String?,
+)
 
 @Serializable
 data class LoadDto(
@@ -78,6 +87,8 @@ data class LinksDto(val links: List<LinkDto>, val subtitles: List<SubtitleDto>)
 @Serializable
 data class InstallRequest(val path: String)
 
+fun Episode.toDto(dub: String?) = EpisodeDto(data, name, season, episode, posterUrl, dub)
+
 fun SearchResponse.toDto() = SearchItemDto(name, url, apiName, type?.name, posterUrl, posterHeaders ?: emptyMap())
 
 fun LoadResponse.toDto() = LoadDto(
@@ -90,8 +101,10 @@ fun LoadResponse.toDto() = LoadDto(
     plot = plot,
     tags = tags ?: emptyList(),
     movieData = (this as? MovieLoadResponse)?.dataUrl,
-    episodes = (this as? TvSeriesLoadResponse)?.episodes.orEmpty().map {
-        EpisodeDto(it.data, it.name, it.season, it.episode, it.posterUrl)
+    episodes = when (this) {
+        is TvSeriesLoadResponse -> episodes.map { it.toDto(null) }
+        is AnimeLoadResponse -> episodes.flatMap { (dub, list) -> list.map { it.toDto(dub.name) } }
+        else -> emptyList()
     },
 )
 
@@ -99,7 +112,9 @@ fun main() {
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8787
     val dataDir = File(System.getenv("GATEWAY_DATA") ?: "data")
     val host = PluginHost(File(dataDir, "cache"))
-    File(dataDir, "plugins").listFiles { f -> f.extension == "cs3" }?.forEach { host.install(it) }
+    File(dataDir, "plugins").listFiles { f -> f.extension == "cs3" }?.forEach {
+        runCatching { host.install(it) }.onFailure { e -> System.err.println("plugin ${it.name} failed: $e") }
+    }
 
     embeddedServer(Netty, port = port) {
         install(ContentNegotiation) { json() }
@@ -114,8 +129,9 @@ fun main() {
 
             post("/plugins") {
                 val file = File(call.receive<InstallRequest>().path)
-                host.install(file)
-                call.respond(HttpStatusCode.Created)
+                runCatching { host.install(file) }
+                    .onSuccess { call.respond(HttpStatusCode.Created) }
+                    .onFailure { call.respond(HttpStatusCode.UnprocessableEntity, it.toString()) }
             }
 
             get("/search") {

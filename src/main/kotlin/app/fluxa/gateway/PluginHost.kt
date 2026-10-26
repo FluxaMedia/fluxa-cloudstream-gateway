@@ -40,7 +40,7 @@ class PluginHost(private val cacheDir: File) {
                 val entry = it.getEntry("classes.dex") ?: error("classes.dex missing in ${cs3.name}")
                 it.getInputStream(entry).use { input -> dex.outputStream().use { out -> input.copyTo(out) } }
             }
-            Dex2jar.from(dex).to(jar.toPath())
+            Dex2jar.from(dex).dontSanitizeNames(true).to(jar.toPath())
             dex.delete()
         }
 
