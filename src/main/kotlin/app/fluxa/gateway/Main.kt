@@ -36,6 +36,9 @@ data class SearchItemDto(
 )
 
 @Serializable
+data class SearchPageDto(val items: List<SearchItemDto>, val hasNext: Boolean)
+
+@Serializable
 data class EpisodeDto(val data: String, val name: String?, val season: Int?, val episode: Int?, val poster: String?)
 
 @Serializable
@@ -119,7 +122,9 @@ fun main() {
                 val api = host.provider(call.request.queryParameters["provider"].orEmpty())
                 val query = call.request.queryParameters["q"].orEmpty()
                 if (api == null) return@get call.respond(HttpStatusCode.NotFound)
-                call.respond(api.search(query).orEmpty().map { it.toDto() })
+                val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+                val res = api.search(query, page)
+                call.respond(SearchPageDto(res?.items.orEmpty().map { it.toDto() }, res?.hasNext ?: false))
             }
 
             get("/load") {
