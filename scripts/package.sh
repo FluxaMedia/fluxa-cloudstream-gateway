@@ -4,8 +4,23 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version="${1:-dev}"
-os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-arch="$(uname -m)"
+
+case "$(uname -s)" in
+    Linux*) os=linux ;;
+    Darwin*) os=macos ;;
+    MINGW* | MSYS* | CYGWIN*) os=windows ;;
+    *) echo "unsupported os" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64 ;;
+    arm64 | aarch64) arch=aarch64 ;;
+    *) echo "unsupported arch" >&2; exit 1 ;;
+esac
+
+java=runtime/bin/java
+[ "$os" = windows ] && java=runtime/bin/java.exe
+
 name="fluxa-cloudstream-gateway-${version}-${os}-${arch}"
 out="dist/${name}"
 
@@ -21,10 +36,16 @@ jlink \
     --output "$out/runtime"
 
 tar czf "dist/${name}.tar.gz" -C dist "$name"
-sum="$(sha256sum "dist/${name}.tar.gz" | cut -d' ' -f1)"
-size="$(stat -c %s "dist/${name}.tar.gz")"
 
-cat > "dist/${name}.json" <<JSON
+if command -v sha256sum >/dev/null; then
+    sum="$(sha256sum "dist/${name}.tar.gz" | cut -d' ' -f1)"
+else
+    sum="$(shasum -a 256 "dist/${name}.tar.gz" | cut -d' ' -f1)"
+fi
+size="$(wc -c < "dist/${name}.tar.gz" | tr -d ' ')"
+
+manifest="dist/manifest-${os}-${arch}.json"
+cat > "$manifest" <<JSON
 {
   "version": "${version}",
   "os": "${os}",
@@ -32,11 +53,11 @@ cat > "dist/${name}.json" <<JSON
   "file": "${name}.tar.gz",
   "sha256": "${sum}",
   "size": ${size},
-  "java": "runtime/bin/java",
+  "java": "${java}",
   "classpath": "lib/*",
   "mainClass": "app.fluxa.gateway.MainKt"
 }
 JSON
 
 rm -rf "$out"
-cat "dist/${name}.json"
+cat "$manifest"
